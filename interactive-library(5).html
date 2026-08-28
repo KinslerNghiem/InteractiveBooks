@@ -126,26 +126,6 @@ ul,ol{list-style:none}
 .lang button:hover{background:rgba(238,242,255,.06);color:var(--cal)}
 .lang button[aria-pressed="true"]{background:var(--ocre);color:var(--tinta)}
 
-/* Find */
-.find{display:flex;flex-direction:column;gap:9px}
-.field{position:relative;display:flex;align-items:center}
-.field .ico{position:absolute;left:13px;width:17px;height:17px;color:var(--cal-muted);pointer-events:none}
-.field input{
-  width:100%;min-height:50px;
-  background:var(--tinta);border:1px solid var(--linea-2);border-radius:6px;
-  padding:10px 50px 10px 40px;font-size:14.5px;
-}
-.field input::placeholder{color:#7d8dc4}
-.field input:focus{outline:3px solid var(--ocre);outline-offset:2px;border-color:transparent}
-.clear{
-  position:absolute;right:3px;width:44px;height:44px;
-  display:none;place-items:center;
-  border:0;border-radius:5px;background:transparent;color:var(--cal-muted);cursor:pointer;
-}
-.clear.on{display:grid}
-.clear:hover{background:rgba(238,242,255,.09);color:var(--cal)}
-.clear svg{width:15px;height:15px}
-
 /* Shelves — a list, with counts that mean something */
 .shelves{display:flex;flex-direction:column;gap:10px}
 .shelves ul{display:flex;flex-direction:column;gap:2px}
@@ -163,6 +143,12 @@ ul,ol{list-style:none}
 .shelf[aria-current="true"]{background:var(--esmalte);color:var(--cal)}
 .shelf[aria-current="true"] .ct{color:var(--cal-muted)}
 .shelf.void{opacity:.42}
+.shelf .chev{width:14px;height:14px;flex:0 0 auto;color:#7d8dc4;transition:transform .18s var(--e)}
+.shelf[aria-expanded="true"] .chev{transform:rotate(180deg)}
+.shelf-books{display:flex;flex-direction:column;gap:1px;margin:2px 0 8px;padding-left:30px}
+.shelf-books a{display:block;padding:7px 10px;border-radius:5px;font-size:13.5px;line-height:1.4;color:var(--cal-muted);text-decoration:none}
+.shelf-books a:hover{background:rgba(238,242,255,.07);color:var(--cal);text-decoration:underline;text-underline-offset:3px}
+.tile{cursor:pointer}
 
 /* Random draw */
 .draw{
@@ -269,7 +255,7 @@ ul,ol{list-style:none}
    across a row of tiles regardless of how long each blurb runs */
 .act{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;padding-top:16px}
 /* Visual affordance only — clicks fall through to the tile link beneath */
-.open{display:inline-flex;align-items:center;gap:8px;pointer-events:none;font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ocre)}
+.open{display:inline-flex;align-items:center;gap:8px;text-decoration:none;cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ocre)}
 .open svg{width:15px;height:15px;transition:transform .2s var(--e)}
 .tile:hover .open svg{transform:translateX(4px)}
 
@@ -345,7 +331,6 @@ ul,ol{list-style:none}
   }
   .mark{grid-column:1}
   .lang{grid-column:2;align-self:center}
-  .find{grid-column:1/-1}
   /* the grid belongs on the <ul>, not on .shelves — otherwise the
      "Shelves" label and the whole list become two side-by-side cells */
   .shelves{grid-column:1/-1;display:block}
@@ -407,17 +392,6 @@ ul,ol{list-style:none}
         <button type="button" data-lang="en" aria-pressed="false">English</button>
       </div>
 
-      <div class="find">
-        <label class="lbl" for="q" data-t="searchLabel">Buscar</label>
-        <div class="field">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg>
-          <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Título, tema o actividad…">
-          <button class="clear" id="clearQ" type="button" aria-label="Borrar búsqueda">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
-          </button>
-        </div>
-      </div>
-
       <nav class="shelves" id="shelves" aria-labelledby="shelvesLbl">
         <p class="lbl" id="shelvesLbl" data-t="shelvesLabel">Estantes</p>
       </nav>
@@ -467,6 +441,7 @@ const I18N={"es":{"docTitle":"Biblioteca Interactiva de En Español","skip":"Ir 
 const KEY = {lang:"ee-library-lang", fav:"ee-library-favorites", recent:"ee-library-recent"};
 let lang     = localStorage.getItem(KEY.lang) === "en" ? "en" : "es";
 let shelf    = "all";
+let expanded = new Set();
 let favorites= new Set(JSON.parse(localStorage.getItem(KEY.fav) || "[]"));
 let recent   = localStorage.getItem(KEY.recent) || "";
 
@@ -482,7 +457,7 @@ const SHELVES = [
 
 const $ = id => document.getElementById(id);
 const el = {
-  tiles:$("tiles"), shelves:$("shelves"), q:$("q"), clearQ:$("clearQ"),
+  tiles:$("tiles"), shelves:$("shelves"),
   tally:$("tally"), empty:$("empty"), emptyTitle:$("emptyTitle"), emptyText:$("emptyText"),
   reset:$("reset"), toast:$("toast"), heroPair:$("heroPair"), footPair:$("footPair"),
   railFoot:$("railFoot"), draw:$("draw"), live:$("live")
@@ -521,20 +496,27 @@ function onShelf(b, id){
   if(id === "favorites") return favorites.has(b.id);
   return b.categories.includes(id);
 }
-const currentQuery = () => fold(el.q.value.trim());
+const currentQuery = () => "";
 const visible = () => BOOKS.filter(b => onShelf(b, shelf) && matchesQuery(b, currentQuery()));
 
 /* ── Render ────────────────────────────────────────────────── */
 function renderShelves(){
-  const q = currentQuery();
   el.shelves.innerHTML = `<p class="lbl" id="shelvesLbl">${esc(t("shelvesLabel"))}</p><ul>` +
     SHELVES.map(s => {
-      const n = BOOKS.filter(b => onShelf(b, s.id) && matchesQuery(b, q)).length;
+      const books = BOOKS.filter(b => onShelf(b, s.id));
+      const n = books.length;
+      const isOpen = expanded.has(s.id);
+      const sub = (isOpen && n)
+        ? `<ul class="shelf-books">` + books.map(b =>
+            `<li><a href="${esc(b.url)}" target="_blank" rel="noopener noreferrer" data-open="${b.id}">${esc(b.title[lang])}</a></li>`
+          ).join("") + `</ul>`
+        : "";
+      const chev = `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
       return `<li><button class="shelf${n?"":" void"}" type="button" data-shelf="${s.id}"
-        style="--sc:${s.color}" aria-current="${shelf === s.id}">
+        style="--sc:${s.color}" aria-current="${shelf === s.id}" aria-expanded="${isOpen}">
         <span class="dot" aria-hidden="true"></span>
         <span class="nm">${esc(t("shelf_" + s.id))}</span>
-        <span class="ct">${n}</span></button></li>`;
+        <span class="ct">${n}</span>${chev}</button>${sub}</li>`;
     }).join("") + `</ul>`;
 }
 
@@ -544,9 +526,9 @@ function renderTiles(){
 
   el.tiles.innerHTML = list.map((b, i) => {
     const saved = favorites.has(b.id);
-    return `<li class="tile${saved ? " saved" : ""}" style="--accent:${esc(b.accent)};--i:${i}">
+    return `<li class="tile${saved ? " saved" : ""}" data-id="${b.id}" style="--accent:${esc(b.accent)};--i:${i}">
       <div class="glaze">
-        <img class="cover" src="${b.cover}" alt="${esc(b.title[lang])}" decoding="async">
+        <a class="cover-link" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer" data-open="${b.id}" tabindex="-1" aria-hidden="true"><img class="cover" src="${b.cover}" alt="${esc(b.title[lang])}" decoding="async"></a>
         ${b.id === recent ? `<span class="ribbon">${esc(t("recent"))}</span>` : ""}
         <span class="bmark" aria-hidden="true">${ICON.flag}</span>
       </div>
@@ -559,7 +541,7 @@ function renderTiles(){
       <p class="desc" lang="${lang}">${esc(b.desc[lang])}</p>
       <ul class="tags">${b.tags[lang].map(x => `<li>${esc(x)}</li>`).join("")}</ul>
       <div class="act">
-        <span class="open" aria-hidden="true">${esc(t("open"))} ${ICON.arrow}</span>
+        <a class="open" href="${esc(b.url)}" target="_blank" rel="noopener noreferrer" data-open="${b.id}"><span class="sr">${esc(b.title[lang])} — </span>${esc(t("open"))} ${ICON.arrow}</a>
         <button class="save" type="button" data-save="${b.id}" aria-pressed="${saved}"
           aria-label="${esc(saved ? t("unsave") : t("save"))} — ${esc(b.title[lang])}"
           title="${esc(saved ? t("unsave") : t("save"))}">${ICON.mark(saved)}</button>
@@ -580,7 +562,6 @@ function renderTiles(){
   el.reset.textContent      = t("reset");
   el.empty.classList.toggle("on", list.length === 0);
   el.tiles.style.display = list.length ? "grid" : "none";
-  el.clearQ.classList.toggle("on", el.q.value.length > 0);
 }
 
 function render(){ renderShelves(); renderTiles(); }
@@ -598,9 +579,6 @@ function applyLang(next){
   el.heroPair.innerHTML = pair(I18N.hero);
   el.footPair.innerHTML = pair(I18N.foot);
   el.railFoot.textContent = t("railFoot");
-  el.q.placeholder = t("searchPlaceholder");
-  el.q.setAttribute("aria-label", t("searchLabel"));
-  el.clearQ.setAttribute("aria-label", t("searchClear"));
   render();
 }
 
@@ -613,7 +591,11 @@ function toast(msg){
   toastTimer = setTimeout(() => el.toast.classList.remove("on"), 2000);
 }
 
-function setShelf(id){ shelf = id; render(); }
+function setShelf(id){
+  if(expanded.has(id)) expanded.delete(id); else expanded.add(id);
+  shelf = id;
+  render();
+}
 
 function toggleSave(id, btn){
   const on = !favorites.has(id);
@@ -635,6 +617,8 @@ function markOpened(id){ recent = id; localStorage.setItem(KEY.recent, id); }
 
 /* ── Events (delegated) ────────────────────────────────────── */
 el.shelves.addEventListener("click", e => {
+  const o = e.target.closest("a[data-open]");
+  if(o){ markOpened(o.dataset.open); setTimeout(renderTiles, 0); return; }
   const b = e.target.closest("[data-shelf]");
   if(b) setShelf(b.dataset.shelf);
 });
@@ -642,11 +626,14 @@ el.tiles.addEventListener("click", e => {
   const s = e.target.closest("[data-save]");
   if(s){ e.preventDefault(); toggleSave(s.dataset.save, s); return; }
   const o = e.target.closest("[data-open]");
-  if(o) markOpened(o.dataset.open);
+  if(o){ markOpened(o.dataset.open); setTimeout(renderTiles, 0); return; }
+  const tl = e.target.closest(".tile");
+  if(tl){
+    const b = byId(tl.dataset.id);
+    if(b){ markOpened(b.id); window.open(b.url, "_blank", "noopener,noreferrer"); setTimeout(renderTiles, 0); }
+  }
 });
-el.q.addEventListener("input", render);
-el.clearQ.addEventListener("click", () => { el.q.value = ""; render(); el.q.focus(); });
-el.reset.addEventListener("click", () => { el.q.value = ""; setShelf("all"); el.q.focus(); });
+el.reset.addEventListener("click", () => setShelf("all"));
 document.getElementById("langGroup").addEventListener("click", e => {
   const b = e.target.closest("[data-lang]");
   if(b && b.dataset.lang !== lang) applyLang(b.dataset.lang);
